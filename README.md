@@ -31,19 +31,7 @@ Phishing attacks represent the largest financial risk to modern enterprises. Thi
 
 # The Cost of Inaction
  
-### ROI Comparison: Manual vs Automated
- 
-| Metric | Manual Analysis | Automated Triage | Difference |
-|--------|-----------------|------------------|-----------|
-| **Cost per Email** | $8.33 | $0.01 | 833x cheaper |
-| **Detection Time** | 20 minutes | 45 seconds | 26.6x faster |
-| **Emails/Day/Analyst** | 40-50 | 1,920* | 40x capacity |
-| **Detection Accuracy** | 65-75% | 94.3% | +19-29% better |
-| **False Positive Rate** | 15-20% | 3.2% | -12-17% fewer |
-| **Annual Cost (500 emp org)** | $520,000 | $15,000 | 97% reduction |
-| **Risk of BEC Loss/Year** | $150K-$500K | $19K-$64K | 87% risk reduction |
- 
-*Per automation instance. Scale to multiple instances as needed.
+![ROI Comparison: Manual vs Automated](sample-output/ROI.png)
 
 ## Solution Architecture
  
@@ -110,13 +98,7 @@ Phishing attacks represent the largest financial risk to modern enterprises. Thi
                     └─────────┘
 ```
 **Business Impact:**
-- ✅ $839,700/month in analyst time freed
-- ✅ 87% reduction in phishing reaching users
-- ✅ 100% of BEC attempts now detected
-- ✅ 0 successful ransomware deployments (1 prevented)
-- ✅ Analyst morale improved (less alert fatigue)
-- ✅ Incident response time: 45 seconds (vs 3-6 hours)
-
+![Business Impact](sample-output/BI.jpeg)
 ## Repo contents
 
 ```
