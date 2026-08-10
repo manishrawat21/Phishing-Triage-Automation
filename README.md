@@ -98,7 +98,7 @@ Phishing attacks represent the largest financial risk to modern enterprises. Thi
                     └─────────┘
 ```
 **Business Impact:**
-![Business Impact](sample-output/BI.jpeg)
+![Business Impact](sample-output/bi.png)
 ## Repo contents
 
 ```
