@@ -102,9 +102,9 @@ Phishing attacks represent the largest financial risk to modern enterprises. Thi
 ## Repo contents
 
 ```
-/workflow           n8n workflow export (importable JSON)
+/workflow            n8n workflow export (importable JSON)
 /prompts             Gemini prompt templates used in the Intent Detection
-/sample-output       One malicious intent detection (sanitized)
+/sample-output       Malicious intent detection (sanitized)
 README.md
 ```
 
