@@ -1,0 +1,1042 @@
+{
+  "name": "Phishing Analysis - Phase 1-4 (Sender + AI Text + URL + Attachment)",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "simple": false,
+        "filters": {
+          "sender": "rawatmanish21@outlook.com"
+        },
+        "options": {
+          "dataPropertyAttachmentsPrefixName": "attachment_",
+          "downloadAttachments": false
+        }
+      },
+      "id": "64c9a902-7b86-462a-b3bb-ac1cc38f0315",
+      "name": "New Email (Gmail Trigger)",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -640,
+        -192
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "gmReDwSxAD5jEqpN",
+          "name": "Gmail account"
+        }
+      },
+      "notes": "Set Gmail credentials. Add sender allowlist filter once Phase 10 KB exists."
+    },
+    {
+      "parameters": {
+        "jsCode": "const msg = items[0].json;\n\n// n8n Gmail Trigger returns headers as a flat object: { 'header-name': 'Header-Name: raw value' }\nconst headersObj = msg.headers || {};\n\nfunction getHeader(name) {\n  const raw = headersObj[name.toLowerCase()];\n  if (!raw) return null;\n  const idx = raw.indexOf(':');\n  return idx !== -1 ? raw.slice(idx + 1).trim() : raw.trim();\n}\n\n// From: prefer n8n's parsed address object if present, fall back to raw header parsing\nlet displayName = '', senderEmail = '';\nif (msg.from && msg.from.value && msg.from.value[0]) {\n  displayName = msg.from.value[0].name || '';\n  senderEmail = msg.from.value[0].address || '';\n} else {\n  const fromRaw = getHeader('From') || '';\n  const displayNameMatch = fromRaw.match(/^\"?([^\"<]*)\"?\\s*<?/);\n  displayName = displayNameMatch ? displayNameMatch[1].trim() : '';\n  const emailMatch = fromRaw.match(/<([^>]+)>/);\n  senderEmail = emailMatch ? emailMatch[1] : fromRaw.trim();\n}\nconst senderDomain = senderEmail.includes('@') ? senderEmail.split('@')[1] : '';\n\n// Originating IP: Received-SPF's client-ip is more reliable than parsing Received here\nconst receivedSpf = getHeader('Received-SPF') || '';\nconst clientIpMatch = receivedSpf.match(/client-ip=([0-9a-fA-F:.]+)/);\nlet originatingIp = clientIpMatch ? clientIpMatch[1] : null;\n\nif (!originatingIp) {\n  const receivedRaw = getHeader('Received') || '';\n  const ipMatch = receivedRaw.match(/\\[([0-9a-fA-F:.]+)\\]/);\n  originatingIp = ipMatch ? ipMatch[1] : null;\n}\n\n// Note: this headers object holds one value per key, so only the LAST \"Received\" header\n// survives if the email had multiple hops — full hop-by-hop chain isn't available here.\n// Would need the raw RFC822 source (Gmail API \"format=raw\") for that.\nconst receivedRawHeader = getHeader('Received');\n\n// Attachments: if \"Download Attachments\" is enabled on the Gmail Trigger node, files\n// arrive as binary data on this item, not as a payload.parts array.\nconst attachments = [];\nif (items[0].binary) {\n  for (const key of Object.keys(items[0].binary)) {\n    const bin = items[0].binary[key];\n    attachments.push({\n      binary_key: key,\n      filename: bin.fileName || null,\n      mime_type: bin.mimeType || null,\n      size: bin.fileSize || null\n    });\n  }\n}\n\nreturn [{\n  json: {\n    message_id: msg.id || null,\n    thread_id: msg.threadId || null,\n    display_name: displayName,\n    sender_email: senderEmail,\n    sender_domain: senderDomain,\n    reply_to: getHeader('Reply-To'),\n    return_path: getHeader('Return-Path'),\n    originating_ip: originatingIp,\n    received_header_raw: receivedRawHeader,\n    subject: getHeader('Subject'),\n    authentication_results: getHeader('Authentication-Results') || '',\n    received_spf: receivedSpf,\n    date: getHeader('Date'),\n    attachments: attachments\n  }\n}];"
+      },
+      "id": "5aaf8356-5699-4848-a56d-f8358d66811f",
+      "name": "Parse Email Headers",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -224,
+        -368
+      ],
+      "notes": "Adjust field paths if your Gmail node output format differs (raw vs parsed mode)."
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = items[0].json;\nconst authHeader = item.authentication_results || '';\nfunction extractResult(mechanism, text) {\n  const re = new RegExp(mechanism + '=([a-zA-Z]+)', 'i');\n  const m = text.match(re);\n  return m ? m[1].toLowerCase() : 'unknown';\n}\nreturn [{\n  json: {\n    ...item,\n    spf_result: extractResult('spf', authHeader),\n    dkim_result: extractResult('dkim', authHeader),\n    dmarc_result: extractResult('dmarc', authHeader)\n  }\n}];"
+      },
+      "id": "67d0c893-0950-405a-a804-d945d9902ae3",
+      "name": "Parse SPF/DKIM/DMARC",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        176,
+        -368
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://www.whoisxmlapi.com/whoisserver/WhoisService?apiKey=at_27vFACIqPDzP4cPuSc4aV2Trig6NM&domainName={{$json.sender_domain}}&outputFormat=JSON",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "0b49b486-ddcd-4130-bf24-a4268f3f5d79",
+      "name": "WHOIS Lookup (Sender Domain)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        656,
+        -432
+      ],
+      "notes": "Replace YOUR_API_KEY. neverError=true so a lookup failure doesn't kill the run."
+    },
+    {
+      "parameters": {
+        "jsCode": "const whoisResp = items[0].json;\nconst original = $('Parse SPF/DKIM/DMARC').item.json;\nconst whois = whoisResp.WhoisRecord || {};\nconst createdDate = whois.createdDate || (whois.registryData ? whois.registryData.createdDate : null) || null;\nlet domainAgeDays = null;\nif (createdDate) {\n  domainAgeDays = Math.floor((Date.now() - new Date(createdDate).getTime()) / (1000 * 60 * 60 * 24));\n}\nreturn [{\n  json: {\n    ...original,\n    domain_created_date: createdDate,\n    domain_age_days: domainAgeDays,\n    newly_registered_domain: domainAgeDays !== null ? domainAgeDays < 30 : null,\n    registrar: whois.registrarName || null\n  }\n}];"
+      },
+      "id": "51b29312-fc69-43ea-8946-62abf9550e5e",
+      "name": "Domain Age Flag",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1088,
+        -432
+      ],
+      "notes": "Fixed to re-merge with the full pre-WHOIS item via $('Parse SPF/DKIM/DMARC') so fields aren't lost."
+    },
+    {
+      "parameters": {
+        "url": "=https://api.abuseipdb.com/api/v2/check?ipAddress={{$json.originating_ip}}&maxAgeInDays=90",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Key",
+              "value": "b3bcbf9fea34ab6232a54ae271a1f5a35e44e68b6b017ea42e42b611beb9933436541361e98ac57a"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "e048d826-c331-4c21-96f0-ba3556107d10",
+      "name": "Mail Server Reputation (AbuseIPDB)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        656,
+        -240
+      ],
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "2pxltehSdl8SKDJb",
+          "name": "Unnamed credential"
+        }
+      },
+      "notes": "Replace YOUR_ABUSEIPDB_KEY."
+    },
+    {
+      "parameters": {
+        "jsCode": "const abuseResp = items[0].json;\nconst original = $('Parse SPF/DKIM/DMARC').item.json;\nconst abuseData = abuseResp.data || {};\n\nconst brandList = ['paypal.com','microsoft.com','google.com','usps.com','fedex.com','dhl.com','amazon.com','apple.com','netflix.com','bankofamerica.com'];\nfunction levenshtein(a, b) {\n  const m = a.length, n = b.length;\n  const dp = Array.from({length: m + 1}, () => new Array(n + 1).fill(0));\n  for (let i = 0; i <= m; i++) dp[i][0] = i;\n  for (let j = 0; j <= n; j++) dp[0][j] = j;\n  for (let i = 1; i <= m; i++) {\n    for (let j = 1; j <= n; j++) {\n      dp[i][j] = a[i-1] === b[j-1] ? dp[i-1][j-1] : 1 + Math.min(dp[i-1][j], dp[i][j-1], dp[i-1][j-1]);\n    }\n  }\n  return dp[m][n];\n}\nconst domain = (original.sender_domain || '').toLowerCase();\nlet closestBrand = null, closestDistance = Infinity;\nfor (const brand of brandList) {\n  const d = levenshtein(domain, brand);\n  if (d < closestDistance) { closestDistance = d; closestBrand = brand; }\n}\n\nreturn [{\n  json: {\n    ...original,\n    abuse_confidence_score: abuseData.abuseConfidenceScore ?? null,\n    ip_country: abuseData.countryCode ?? null,\n    ip_isp: abuseData.isp ?? null,\n    ip_total_reports: abuseData.totalReports ?? null,\n    closest_brand_match: closestBrand,\n    edit_distance: closestDistance,\n    likely_typosquat: closestDistance > 0 && closestDistance <= 3,\n    contains_punycode: domain.includes('xn--')\n  }\n}];"
+      },
+      "id": "87ff669f-9142-491f-bb9e-dd2e4df12b10",
+      "name": "Homoglyph / Typosquat Check",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1088,
+        -240
+      ],
+      "notes": "Fixed to re-merge original item + AbuseIPDB fields; expand brandList for your environment."
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "15y19Hqkc82BUBxQ5xuzpuCqWHzTCQghgy-S7U1rbsOU",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "https://docs.google.com/spreadsheets/d/15y19Hqkc82BUBxQ5xuzpuCqWHzTCQghgy-S7U1rbsOU/edit?gid=0#gid=0",
+          "mode": "url"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "message_id",
+              "displayName": "message_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "thread_id",
+              "displayName": "thread_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "display_name",
+              "displayName": "display_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "sender_email",
+              "displayName": "sender_email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "sender_domain",
+              "displayName": "sender_domain",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "reply_to",
+              "displayName": "reply_to",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "return_path",
+              "displayName": "return_path",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "originating_ip",
+              "displayName": "originating_ip",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "received_header_raw",
+              "displayName": "received_header_raw",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "subject",
+              "displayName": "subject",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "authentication_results",
+              "displayName": "authentication_results",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "received_spf",
+              "displayName": "received_spf",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "date",
+              "displayName": "date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "attachments",
+              "displayName": "attachments",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "spf_result",
+              "displayName": "spf_result",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "dkim_result",
+              "displayName": "dkim_result",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "dmarc_result",
+              "displayName": "dmarc_result",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "domain_created_date",
+              "displayName": "domain_created_date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "domain_age_days",
+              "displayName": "domain_age_days",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "newly_registered_domain",
+              "displayName": "newly_registered_domain",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "registrar",
+              "displayName": "registrar",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "abuse_confidence_score",
+              "displayName": "abuse_confidence_score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "ip_country",
+              "displayName": "ip_country",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "ip_isp",
+              "displayName": "ip_isp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "ip_total_reports",
+              "displayName": "ip_total_reports",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "closest_brand_match",
+              "displayName": "closest_brand_match",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "edit_distance",
+              "displayName": "edit_distance",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "likely_typosquat",
+              "displayName": "likely_typosquat",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "contains_punycode",
+              "displayName": "contains_punycode",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "intent",
+              "displayName": "intent",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "verdict",
+              "displayName": "verdict",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "score",
+              "displayName": "score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "tone",
+              "displayName": "tone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "url_analysis",
+              "displayName": "url_analysis",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "5e3d311f-b5e5-4461-a58f-3795af7cf5c3",
+      "name": "Check Prior Sightings (Google Sheets)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        2320,
+        -112
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "W9ctoGArzfKk6LaN",
+          "name": "Google Sheets account"
+        }
+      },
+      "notes": "Point at the Phase 10 Knowledge Base sheet once it exists."
+    },
+    {
+      "parameters": {
+        "jsCode": "const msg = items[0].json;\n\n// n8n's Gmail Trigger already parses the body — msg.text is clean plain text\nlet plainText = msg.text || '';\n\nif (!plainText && msg.html) {\n  plainText = msg.html\n    .replace(/<style[^>]*>[\\s\\S]*?<\\/style>/gi, '')\n    .replace(/<script[^>]*>[\\s\\S]*?<\\/script>/gi, '')\n    .replace(/<[^>]+>/g, ' ')\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\nplainText = plainText\n  .replace(/Sent from Outlook for Android.*$/is, '')\n  .trim();\n\nreturn [{\n  json: {\n    ...msg,\n    decoded_html: msg.html || '',\n    plain_text_body: plainText\n  }\n}];"
+      },
+      "id": "4ea4abcc-e58f-44e1-86e2-95dee47200dd",
+      "name": "Extract Plain Text Body",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -256,
+        16
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = items[0].json;\n\nlet rawText = '';\n\n// Extract Gemini/n8n model response\nif (item.content?.parts?.[0]?.text) {\n  rawText = item.content.parts[0].text;\n} \nelse if (item.candidates?.[0]?.content?.parts?.[0]?.text) {\n  rawText = item.candidates[0].content.parts[0].text;\n}\n\n// Clean markdown fences\nconst cleaned = rawText\n  .replace(/```json/gi, '')\n  .replace(/```/g, '')\n  .trim();\n\nlet parsed;\n\ntry {\n  parsed = JSON.parse(cleaned);\n} catch (error) {\n\n  // Try extracting JSON object\n  const start = cleaned.indexOf('{');\n  const end = cleaned.lastIndexOf('}');\n\n  if (start === -1 || end === -1) {\n    return [{\n      json: {\n        status: 'FAILED',\n        error: 'Could not find JSON in AI response',\n        raw_response: rawText\n      }\n    }];\n  }\n\n  try {\n    parsed = JSON.parse(\n      cleaned.substring(start, end + 1)\n    );\n  } catch (error2) {\n    return [{\n      json: {\n        status: 'FAILED',\n        error: error2.message,\n        raw_response: rawText\n      }\n    }];\n  }\n}\n\n// Extract only what you need\nconst intent = parsed.intent ?? '';\nconst verdict = parsed.verdict ?? '';\nconst score = parsed.phishing_score ?? null;\nconst tone = parsed.tone ?? '';\n\n// Clean final output\nreturn [{\n  json: {\n    intent: intent,\n    verdict: verdict,\n    score: score,\n    tone: tone\n  }\n}];"
+      },
+      "id": "341d0a8c-8d80-49c7-b307-56171684d5a4",
+      "name": "Validate & Parse AI Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1072,
+        -16
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = items[0].json;\nconst text = (item.decoded_html || '') + ' ' + (item.plain_text_body || '');\nconst urlRegex = /https?:\\/\\/[^\\s\"'<>)]+/g;\nconst found = [...new Set((text.match(urlRegex) || []))];\n\nconst shorteners = ['bit.ly','tinyurl.com','t.co','goo.gl','ow.ly','is.gd','buff.ly'];\n\nfunction shannonEntropy(str) {\n  const freq = {};\n  for (const ch of str) freq[ch] = (freq[ch] || 0) + 1;\n  let entropy = 0;\n  const len = str.length;\n  for (const ch in freq) {\n    const p = freq[ch] / len;\n    entropy -= p * Math.log2(p);\n  }\n  return Math.round(entropy * 100) / 100;\n}\n\nreturn found.map(url => {\n  let domain = '';\n  try { domain = new URL(url).hostname; } catch (e) { domain = ''; }\n  return {\n    json: {\n      message_id: item.message_id,\n      sender_domain: item.sender_domain,\n      url: url,\n      url_domain: domain,\n      entropy: shannonEntropy(url),\n      contains_punycode: domain.includes('xn--'),\n      is_shortener: shorteners.some(s => domain.includes(s))\n    }\n  };\n});"
+      },
+      "id": "68b9b5b7-96de-49a2-8721-18415d76b3ef",
+      "name": "Extract URLs & Compute Entropy",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        160
+      ],
+      "notes": "Returns one item per unique URL found. If no URLs, returns an empty array and this branch simply produces no output for that email."
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = items[0].json;\nconst b64 = Buffer.from(item.url).toString('base64');\nconst urlId = b64.replace(/\\+/g,'-').replace(/\\//g,'_').replace(/=+$/,'');\nreturn [{ json: { ...item, url_id: urlId } }];"
+      },
+      "id": "363f43ca-b7e4-4f0c-b4ed-52d1b475cdba",
+      "name": "Compute VT URL ID",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        160
+      ],
+      "notes": "VirusTotal v3 requires the URL identifier as unpadded base64url of the URL string."
+    },
+    {
+      "parameters": {
+        "url": "=https://www.virustotal.com/api/v3/urls/{{ $json.url_id }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "virusTotalApi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "id",
+              "value": "={{ $json.url_id }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {}
+          }
+        }
+      },
+      "id": "ba99e953-e95e-4fe6-9609-9841f2dee647",
+      "name": "VT URL Report",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        448,
+        160
+      ],
+      "credentials": {
+        "virusTotalApi": {
+          "id": "2v1pCphMaOzl0VMk",
+          "name": "VirusTotal account"
+        }
+      },
+      "notes": "Replace YOUR_VT_API_KEY. neverError=true — an unknown URL returns 404, handled downstream rather than failing the run."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://urlscan.io/api/v1/scan/",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "urlScanIoApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "API-Key",
+              "value": "YOUR_URLSCAN_API_KEY"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"url\": $('Compute VT URL ID').item.json.url, \"visibility\": \"unlisted\" } }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "c2759462-1208-4a1a-ab11-ba32f8d6ec0f",
+      "name": "urlscan Submit",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        672,
+        160
+      ],
+      "credentials": {
+        "urlScanIoApi": {
+          "id": "6AeA4ooQSNF2Ftq0",
+          "name": "urlscan.io account"
+        }
+      },
+      "notes": "Replace YOUR_URLSCAN_API_KEY."
+    },
+    {
+      "parameters": {
+        "amount": 40
+      },
+      "id": "923f7739-07a8-41d6-9c29-d3d44d58c090",
+      "name": "Wait for Scan",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        880,
+        160
+      ],
+      "webhookId": "605cec82-5f55-40b2-8d79-684a964f21d1",
+      "notes": "urlscan needs time to render/screenshot the page. 40s is a starting point — increase if results come back incomplete."
+    },
+    {
+      "parameters": {
+        "url": "=https://urlscan.io/api/v1/result/{{$('urlscan Submit').item.json.uuid}}/",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "urlScanIoApi",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "e9dc328c-adbb-4c3d-a685-15ca31f658f7",
+      "name": "urlscan Fetch Result",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1072,
+        176
+      ],
+      "credentials": {
+        "urlScanIoApi": {
+          "id": "6AeA4ooQSNF2Ftq0",
+          "name": "urlscan.io account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const scanResult = items[0].json;\nconst original = $('Compute VT URL ID').item.json;\nconst vt = $('VT URL Report').item.json;\n\nconst vtStats = (vt.data && vt.data.attributes && vt.data.attributes.last_analysis_stats) || null;\nconst finalUrl = (scanResult.page && scanResult.page.url) || original.url;\nconst finalDomain = (scanResult.page && scanResult.page.domain) || original.url_domain;\nconst redirected = finalDomain && original.url_domain && finalDomain !== original.url_domain;\n\nlet credentialFormDetected = false;\ntry {\n  const htmlSnippet = JSON.stringify(scanResult).toLowerCase();\n  credentialFormDetected = htmlSnippet.includes('type=\\\"password\\\"') || htmlSnippet.includes(\"type='password'\");\n} catch (e) { /* best effort only */ }\n\nreturn [{\n  json: {\n    message_id: original.message_id,\n    url: original.url,\n    url_domain: original.url_domain,\n    entropy: original.entropy,\n    contains_punycode: original.contains_punycode,\n    is_shortener: original.is_shortener,\n    vt_malicious_count: vtStats ? vtStats.malicious : null,\n    vt_suspicious_count: vtStats ? vtStats.suspicious : null,\n    vt_found: !!vt.data,\n    final_url_after_redirect: finalUrl,\n    final_domain_after_redirect: finalDomain,\n    redirected_to_different_domain: redirected,\n    credential_form_detected_heuristic: credentialFormDetected\n  }\n}];"
+      },
+      "id": "26aacb1c-0f5e-4de8-b41d-0d3f2859fd45",
+      "name": "Parse URL Verdict",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1328,
+        176
+      ],
+      "notes": "credential_form_detected_heuristic is a best-effort string match on the urlscan response, not a real DOM parse — treat as a hint, not a verdict."
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "destinationFieldName": "url_analysis",
+        "options": {}
+      },
+      "id": "10d34b87-09f7-4003-a9ed-059836052af1",
+      "name": "Aggregate URL Results",
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        1568,
+        176
+      ],
+      "notes": "Combines every analyzed URL into one url_analysis array on a single item."
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "models/gemini-3.5-flash",
+          "mode": "list",
+          "cachedResultName": "models/gemini-3.5-flash"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=You are a senior SOC analyst and certified phishing forensics expert with 15+ years\ninvestigating social engineering attacks. You have analyzed thousands of confirmed\nphishing campaigns, BEC attacks, and credential-harvesting emails. You are known for\nbeing precise, evidence-based, and for never overstating confidence when evidence is thin.\n\nYour task: perform a deep social-engineering and manipulation-technique analysis of the\nemail text below. Do not just pattern-match on keywords — reason about intent, context,\nand how a human target would actually experience this message.\n\n=== ANALYSIS METHODOLOGY ===\n\nStep 1 — Read the full text({{ $json.text }}) once for overall tone, intent, and what action (if any) it's\npushing the reader toward.\n\nStep 2 — For each of the following technique categories, determine if it is genuinely\npresent. A technique is only \"detected\" if there is direct textual evidence — do not\ninfer techniques that aren't actually expressed in the words used.\n\nTECHNIQUE TAXONOMY:\n- urgency (artificial time pressure, \"act now\", \"immediately\", \"asap\")\n- fear (threats of loss, punishment, negative consequences)\n- authority_impersonation (posing as IT, security team, government, executive)\n- ceo_fraud (impersonating a senior executive requesting urgent action)\n- financial_pressure (invoice, payment, wire transfer, refund themes)\n- curiosity (vague enticing hooks — \"you won't believe\", unnamed attachments)\n- scarcity (limited time/limited offer framing)\n- reward (prizes, gifts, unexpected money)\n- invoice_payment (fake billing, overdue payment notices)\n- account_verification (fake \"verify your account\" prompts)\n- password_reset (fake password/security alerts)\n- mfa_fatigue (repeated authentication prompts, \"approve this login\")\n- shipping_notification (fake delivery/tracking themes)\n- hr_impersonation (posing as HR, payroll, benefits)\n- it_impersonation (posing as IT support, helpdesk)\n- vendor_impersonation (posing as a known supplier/partner)\n- legal_threat (fake legal action, lawsuit, compliance threats)\n- tax_scam (fake tax authority communication)\n- charity_scam (fake donation requests)\n- brand_impersonation (mimicking a known company's tone/branding)\n- generic_greeting (absence of personalization — \"Dear Customer\" instead of a name)\n- grammar_anomaly (unnatural phrasing, awkward translation, inconsistent tone)\n- request_for_action (asks the reader to click, open, download, reply, or transfer something)\n\nStep 3 — For each \n\nI want you to seperate the intent, verdict, tone, techniques and Phishing score output from the text. I need these key pair value seprately\n"
+            }
+          ]
+        },
+        "jsonOutput": true,
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        544,
+        0
+      ],
+      "id": "a725b4ac-fa63-4764-a34d-281dd028ee1e",
+      "name": "Message a model",
+      "retryOnFail": true,
+      "maxTries": 5,
+      "notesInFlow": false,
+      "credentials": {
+        "googlePalmApi": {
+          "id": "Hn8DDmVx6c6fXRyf",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "numberInputs": 4
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1904,
+        -144
+      ],
+      "id": "563448e7-d857-4c89-9d13-a40ca5964fb2",
+      "name": "Merge"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "New Email (Gmail Trigger)": {
+      "main": [
+        [
+          {
+            "node": "Parse Email Headers",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Extract Plain Text Body",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Email Headers": {
+      "main": [
+        [
+          {
+            "node": "Parse SPF/DKIM/DMARC",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse SPF/DKIM/DMARC": {
+      "main": [
+        [
+          {
+            "node": "WHOIS Lookup (Sender Domain)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Mail Server Reputation (AbuseIPDB)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "WHOIS Lookup (Sender Domain)": {
+      "main": [
+        [
+          {
+            "node": "Domain Age Flag",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mail Server Reputation (AbuseIPDB)": {
+      "main": [
+        [
+          {
+            "node": "Homoglyph / Typosquat Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Homoglyph / Typosquat Check": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Check Prior Sightings (Google Sheets)": {
+      "main": [
+        []
+      ]
+    },
+    "Domain Age Flag": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Plain Text Body": {
+      "main": [
+        [
+          {
+            "node": "Extract URLs & Compute Entropy",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Message a model",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract URLs & Compute Entropy": {
+      "main": [
+        [
+          {
+            "node": "Compute VT URL ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compute VT URL ID": {
+      "main": [
+        [
+          {
+            "node": "VT URL Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "VT URL Report": {
+      "main": [
+        [
+          {
+            "node": "urlscan Submit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "urlscan Submit": {
+      "main": [
+        [
+          {
+            "node": "Wait for Scan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for Scan": {
+      "main": [
+        [
+          {
+            "node": "urlscan Fetch Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "urlscan Fetch Result": {
+      "main": [
+        [
+          {
+            "node": "Parse URL Verdict",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse URL Verdict": {
+      "main": [
+        [
+          {
+            "node": "Aggregate URL Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate & Parse AI Response": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Aggregate URL Results": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "Message a model": {
+      "main": [
+        [
+          {
+            "node": "Validate & Parse AI Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Check Prior Sightings (Google Sheets)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "34fde245-10a7-4d4e-b7ac-3962709e8039",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "add9ebf2bfa2df88846abda185023529c307088d1603b9fb670db2ecc8417dfc"
+  },
+  "nodeGroups": [],
+  "id": "cdosCrDe65TE5QDI",
+  "tags": []
+}
