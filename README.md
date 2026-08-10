@@ -7,15 +7,15 @@ Phishing attacks represent the largest financial risk to modern enterprises. Thi
 
 ### Key Outcomes:
 
-🎯 Detection Time: 45 seconds (vs 20 min manual)
+- **Detection Time:** 45 seconds (vs 20 min manual)
 
-📊 Accuracy: 94.3% (vs 65-75% manual)
+- **Accuracy:** 94.3% (vs 65-75% manual)
 
-💰 Annual Savings: $839,700+ per analyst
+- **Annual Savings:** $839,700+ per analyst
 
-⚡ Processing Capacity: 1,920 emails/day per automation instance
+- **Processing Capacity:** 1,920 emails/day per automation instance
 
-🔒 Risk Reduction: 87% of phishing attempts blocked pre-delivery
+- **Risk Reduction:** 87% of phishing attempts blocked pre-delivery
 
 ## The Problem: Organizational Impact
  
@@ -29,13 +29,12 @@ Phishing attacks represent the largest financial risk to modern enterprises. Thi
 | **82% of breaches involve phishing** | 2024 State of Email Security | Industry-wide threat |
 | **Enterprise receive 85-125 phishing emails/employee/day** | Tessian Research | Overwhelming volume |
 
-# The Cost of Inaction
+# ROI Comparison: Manual vs Automated
  
 ![ROI Comparison: Manual vs Automated](sample-output/ROI.png)
 
 ## Solution Architecture
- 
-### Automated Detection Pipeline
+
  
 ```
 ┌─────────────────────────────────────────────────────────────┐
