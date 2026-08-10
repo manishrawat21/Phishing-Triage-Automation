@@ -121,7 +121,8 @@ I enjoy building practical tools that help defenders automate repetitive workflo
 - **GitHub:** [github.com/manishrawat21](https://github.com/manishrawat21)
 - **Medium:** [medium.com/@manishrawat21](https://medium.com/@manishrawat21)
 - **Email:** [rawatmanish21@outlook.com](mailto:rawatmanish21@outlook.com)
-### Other Projects
+### Other SOC Automation Projects
 - **[CISA KEV Threat Intel Orchestrator](https://github.com/manishrawat21/Cisa-KEV-Threat-Intel-Orchestrator)** - Automated Sigma rule generation from CISA vulnerabilities
+- **[Wazuh + N8N Automation](https://github.com/manishrawat21/soc-automation-lab)** -  Focuses on how alerts move from detection to investigation and notification
 ---
 
